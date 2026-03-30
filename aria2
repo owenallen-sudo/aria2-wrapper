@@ -1,0 +1,313 @@
+#!/bin/bash
+mkdir -p $HOME/.config/aria2dl
+
+#Logic for flag file
+FLAGS_FILE="$HOME/.config/aria2dl/flags"
+if  [ ! -f "$HOME/.config/aria2dl/flags" ]; then
+touch "$FLAGS_FILE"
+fi
+
+# Logic for addflag
+if [[ "$1" == "addflag" ]]; then
+  SCRIPT_FLAG="$2"
+  ARIA2C_FLAG="$4"  # $3 is "for"
+  if [[ -z "$SCRIPT_FLAG" || -z "$ARIA2C_FLAG" ]]; then
+    echo "Usage: aria2 addflag <scriptflag> for <aria2cflag>"
+    exit 1
+  fi
+  if grep -q "^$SCRIPT_FLAG:" "$FLAGS_FILE"; then
+    echo "Flag $SCRIPT_FLAG already exists, use removeflag first to replace it."
+    exit 1
+  fi
+  echo "$SCRIPT_FLAG:$ARIA2C_FLAG" >> "$FLAGS_FILE"
+  echo "Added: $SCRIPT_FLAG -> $ARIA2C_FLAG"
+  exit 0
+fi
+
+# Logic for removeflag
+if [[ "$1" == "removeflag" ]]; then
+  SCRIPT_FLAG="$2"
+  if ! grep -q "^$SCRIPT_FLAG:" "$FLAGS_FILE"; then
+    echo "Flag $SCRIPT_FLAG does not exist."
+    exit 1
+  fi
+  grep -v "^$SCRIPT_FLAG:" "$FLAGS_FILE" > /tmp/aria2dl_tmp && mv /tmp/aria2dl_tmp "$FLAGS_FILE"
+  echo "Removed: $SCRIPT_FLAG"
+  exit 0
+fi
+
+#defaults
+FILEPATH="$HOME"
+CHECK_CERT=true
+DOWNLOAD_LIMIT="750K"
+UPLOAD_LIMIT="1M"
+STREAMS=12
+MAX_SCRIPT_TRIES=3
+CONTINUE=false
+URI_SELECTOR=feedback
+FILE_ALLOCATION=falloc
+SAVING_INTERVAL=5
+ALLOW_OVERWRITE=true
+TIMEOUT=600
+RETRY_WAIT=8
+MAX_TRIES_INSIDE_ARIA2C=600
+NTFY_TOPIC=download_on_pc
+CONFIG_FILE="$HOME/.config/aria2dl/config"
+NTFY_ENABLED=true
+DOWNLOAD_ALL=false
+CURL="$(command -v /usr/bin/curl)"
+ARIA2C="$(command -v /usr/bin/aria2c)"
+WGET="$(command -v /usr/bin/wget)"
+COMPRESSION=true
+URL=""
+
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  source "$CONFIG_FILE"
+fi
+
+
+# Function to send iPhone notification
+send_notification() {
+  local status=$1
+  local body=$2 
+
+
+  "$CURL" -H "Title:$status" \
+       -H "Priority: default" \
+       -H "Tags: package,white_check_mark" \
+       -d "$body" \
+       "https://ntfy.sh/$NTFY_TOPIC"
+}
+
+# Crawl a URL and return all file links under it, preserving relative paths
+crawl_urls() {
+  local base_url="$1"
+  "$WGET" --spider -r -nd -nv --no-parent "$base_url" 2>&1 \
+    | grep -oP 'https?://\S+' \
+    | grep -v '/$' \
+    | sort -u
+}
+
+# Build an aria2c input file from crawled URLs
+build_aria2_input() {
+  local base_url="$1"
+  local dest_dir="$2"
+  local input_file="$3"
+
+  # Strip trailing slash from base for clean relative path extraction
+  base_url="${base_url%/}"
+  > "$input_file"
+
+  while IFS= read -r link; do
+    local relative="${link#$base_url}"
+    relative="${relative#/}"
+    local file_dir file_name
+    file_dir=$(dirname "$relative")
+    file_name=$(basename "$relative")
+    # aria2c input file format: URL on one line, options indented on next lines
+    printf '%s\n  dir=%s/%s\n  out=%s\n\n' \
+      "$link" "$dest_dir" "$file_dir" "$file_name" >> "$input_file"
+  done < <(crawl_urls "$base_url")
+
+  local count
+  count=$(grep -c '^http' "$input_file" 2>/dev/null || echo 0)
+  echo "Found $count files to download."
+  [[ "$count" -eq 0 ]] && return 1
+  return 0
+}
+detect_folder_url() {
+  local url="$1"
+  # Explicit trailing slash = folder
+  [[ "$url" == */ ]] && echo "true" && return
+  # Has a file extension in last path segment = single file
+  local segment="${url%%\?*}"; segment="${segment##*/}"
+  [[ "$segment" == *.* ]] && echo "false" && return
+  # No extension — follow redirects and check if final URL has trailing slash
+  local effective
+  effective=$("$CURL" -sI --max-time 10 -o /dev/null -w '%{url_effective}' "$url")
+  [[ "$effective" == */ ]] && echo "true" || echo "false"
+}
+#Parse flags
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --check-certificate=*) CHECK_CERT="${1#*=}" ;;
+    --download-limit=*) DOWNLOAD_LIMIT="${1#*=}" ;;
+    --upload-limit=*) UPLOAD_LIMIT="${1#*=}" ;;
+    --streams=*) STREAMS="${1#*=}" ;;
+    --max-script-attempts=*) MAX_SCRIPT_TRIES="${1#*=}" ;;
+    --filepath=*) FILEPATH="${1#*=}" ;;
+    --file-allocation=*) FILE_ALLOCATION="${1#*=}" ;;
+    --timeout=*) TIMEOUT="${1#*=}" ;;
+    --uri-selector=*) URI_SELECTOR="${1#*=}" ;;
+    --max-tries-inside-aria2=*) MAX_TRIES_INSIDE_ARIA2C="${1#*=}" ;;
+    --retry-inside-aria2-wait=*) RETRY_WAIT="${1#*=}" ;;
+    --saving-interval=*) SAVING_INTERVAL="${1#*=}" ;;
+    --allow-overwrite=*) ALLOW_OVERWRITE="${1#*=}" ;;
+    --ntfy-topic=*) NTFY_TOPIC="${1#*=}" ;;
+    --ntfy-enabled=*) NTFY_ENABLED="${1#*=}" ;;
+    --curl-path=*) CURL="${1#*=}" ;;
+    --wget-path=*) WGET="${1#*=}" ;;
+    --aria2-path=*) ARIA2C="${1#*=}" ;; 
+    --continue=*) CONTINUE="${1#*=}" ;;
+    --download-all-files=*) DOWNLOAD_ALL="${1#*=}" ;;
+    --http-accept-gzip=*) COMPRESSION="${1#*=}" ;;
+    -c) CONTINUE="true" ;;
+    http*|ftp*|magnet*) URL="$1" ;;
+    *)
+      MATCHED=false
+      while IFS=: read -r SFLAG AFLAG; do
+        if [[ "$SFLAG" == *= ]]; then
+          FNAME="${SFLAG%=}"
+          if [[ "$1" == "$FNAME="* ]]; then
+            EXTRA_ARGS+=("${AFLAG%=}=${1#*=}")
+            MATCHED=true; break
+          fi
+        elif [[ "$1" == "$SFLAG" ]]; then
+          EXTRA_ARGS+=("$AFLAG")
+          MATCHED=true; break
+        fi
+      done < "$FLAGS_FILE"
+      [[ "$MATCHED" == false ]] && echo "Not a flag, edit script to add flag"
+      ;;
+  esac
+  shift
+done
+
+
+cat > "$CONFIG_FILE" <<EOF
+NTFY_TOPIC="$NTFY_TOPIC"
+STREAMS="$STREAMS"
+DOWNLOAD_LIMIT="$DOWNLOAD_LIMIT"
+UPLOAD_LIMIT="$UPLOAD_LIMIT"
+FILE_ALLOCATION="$FILE_ALLOCATION"
+TIMEOUT="$TIMEOUT"
+RETRY_WAIT="$RETRY_WAIT"
+MAX_TRIES_INSIDE_ARIA2C="$MAX_TRIES_INSIDE_ARIA2C"
+MAX_SCRIPT_TRIES="$MAX_SCRIPT_TRIES"
+SAVING_INTERVAL="$SAVING_INTERVAL"
+URI_SELECTOR="$URI_SELECTOR"
+NTFY_ENABLED="$NTFY_ENABLED"
+CURL="$CURL"
+ARIA2C="$ARIA2C"
+WGET="$WGET"
+COMPRESSION="$COMPRESSION"
+EOF
+
+
+# If no filename mentioned, split into dir + filename
+if [[ "$FILEPATH" == */ ]] || [[ -d "$FILEPATH" ]]; then
+  DIRPATH="${FILEPATH%/}"
+  OUTFILE=$(basename "${URL%%\?*}")
+else
+  DIRPATH=$(dirname "$FILEPATH")
+  OUTFILE=$(basename "$FILEPATH")
+fi
+
+
+mkdir -p "$DIRPATH"
+SESSION_FILE="$DIRPATH/aria2.session"
+LOGFILE="$DIRPATH/aria2.log"
+
+
+if [[ "$CONTINUE" != "true" ]]; then
+  truncate -s 0 "$SESSION_FILE" 2>/dev/null || touch "$SESSION_FILE"
+fi
+
+if [[ -z "$URL" ]]; then
+  echo "Error: no URL provided."
+  exit 1
+fi
+
+# Auto-detect folder mode unless explicitly set via flag
+if [[ "$DOWNLOAD_ALL" == "false" ]]; then
+  DOWNLOAD_ALL=$(detect_folder_url "$URL")
+  [[ "$DOWNLOAD_ALL" == "true" ]] && echo "Folder URL detected, downloading all files."
+fi
+
+# Set a human-readable label for notifications
+if [[ "$DOWNLOAD_ALL" == "true" ]]; then
+  LABEL="$URL (folder)"
+else
+  LABEL="$OUTFILE"
+fi
+
+# Crawl once before the retry loop
+CRAWL_INPUT=""
+if [[ "$DOWNLOAD_ALL" == "true" ]]; then
+  CRAWL_INPUT="$DIRPATH/aria2_crawl.txt"
+  echo "Crawling $URL for file list..."
+  if ! build_aria2_input "$URL" "$DIRPATH" "$CRAWL_INPUT"; then
+    echo "Error: no downloadable files found at $URL"
+    exit 1
+  fi
+fi
+
+# Attempt loop
+ATTEMPT=0
+SUCCESS=false
+while [[ $ATTEMPT -lt $MAX_SCRIPT_TRIES ]]; do
+  ATTEMPT=$((ATTEMPT + 1))
+
+  CMD=("$ARIA2C"
+    -x "$STREAMS"
+    -s "$STREAMS"
+    --max-tries="$MAX_TRIES_INSIDE_ARIA2C"
+    --retry-wait="$RETRY_WAIT"
+    --timeout="$TIMEOUT"
+    --check-certificate="$CHECK_CERT"
+    --save-session="$SESSION_FILE"
+    --save-session-interval="$SAVING_INTERVAL"
+    --allow-overwrite="$ALLOW_OVERWRITE" 
+    --file-allocation="$FILE_ALLOCATION"
+    --max-overall-download-limit="$DOWNLOAD_LIMIT"
+    --max-overall-upload-limit="$UPLOAD_LIMIT"
+    --uri-selector="$URI_SELECTOR"
+  )
+
+  if [[ "$DOWNLOAD_ALL" == "true" ]]; then
+    CRAWL_INPUT="$DIRPATH/aria2_crawl.txt"
+    echo "Crawling $URL for file list..."
+    if ! build_aria2_input "$URL" "$DIRPATH" "$CRAWL_INPUT"; then
+      echo "Error: no downloadable files found at $URL"
+      exit 1
+    fi
+    CMD+=(--input-file="$CRAWL_INPUT")
+  elif [[ "$CONTINUE" == "true" ]] && [[ -s "$SESSION_FILE" ]]; then
+    CMD+=(--dir="$DIRPATH" --input-file="$SESSION_FILE" -c)
+  else
+    CMD+=(--dir="$DIRPATH" -o "$OUTFILE" "$URL")
+  fi
+  
+  CMD+=("${EXTRA_ARGS[@]}")
+
+  echo "=== $(date) ===" | tee -a "$LOGFILE"
+  echo "Running: ${CMD[@]}" | tee -a "$LOGFILE"
+  "${CMD[@]}" 2>&1 | tee -a "$LOGFILE"
+  EXIT_CODE=${PIPESTATUS[0]}
+
+
+  if [[ $EXIT_CODE -eq 0 ]]; then
+    SUCCESS=true
+    break
+  else
+    echo "[ATTEMPT $ATTEMPT/$MAX_SCRIPT_TRIES] Failed with exit code $EXIT_CODE."
+    if [[ $ATTEMPT -lt $MAX_SCRIPT_TRIES ]]; then
+      echo "Retrying in 10 seconds"
+      [[ "$NTFY_ENABLED" == "true" ]]&& send_notification "Failed (exit code $EXIT_CODE), check $LOGFILE" "$OUTFILE"
+      sleep 10
+    fi
+  fi
+done
+
+
+if [ "$SUCCESS" = true ]; then
+  echo "Downloaded to: $DIRPATH."
+  [[ "$NTFY_ENABLED" == "true" ]] && send_notification "Download complete" "$LABEL"
+else
+  echo "Download failed after $MAX_SCRIPT_TRIES attempts with exit code $EXIT_CODE."
+  [[ "$NTFY_ENABLED" == "true" ]] && send_notification "Download failed after $MAX_SCRIPT_TRIES attempts" "$LABEL — check $LOGFILE"
+  exit 1
+fi
+  [[ "$NTFY_ENABLED" == "true" ]] && send_notification "Attempt $ATTEMPT failed (exit $EXIT_CODE)" "$LABEL" exit 1
+fi
