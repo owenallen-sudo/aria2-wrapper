@@ -7,13 +7,13 @@ Minimal Bash wrapper for `aria2c` with persistent config, retries, directory cra
 ## Usage
 
 ```bash
-aria2dl <URL> [options]
+aria2 <URL> [options]
 ```
 
 Example:
 
 ```bash
-aria2dl https://example.com/file.zip --streams=16 --download-limit=1M
+aria2 https://example.com/file.zip --streams=16 --download-limit=1M
 ```
 
 ---
