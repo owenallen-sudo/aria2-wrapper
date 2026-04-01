@@ -1,6 +1,6 @@
 # aria2
 
-Minimal Bash wrapper for `aria2c` with persistent config, retries, directory crawling, multiple flags and custom flag aliases. It uses the Mozilla Public License v. 2.0.
+Minimal Bash wrapper for `aria2c` with persistent config, retries, directory crawling, multiple flags and custom flag aliases. It uses the Mozilla Public License V. 2.0.
 
 ---
 
