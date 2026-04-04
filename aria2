@@ -69,6 +69,7 @@ USE_ARIA2=false
 USE_CURL=false
 USE_WGET=false
 USE_GIT=false
+USE_SURGE=false
 GITHUB_TOKEN=""
 GITHUB_BRANCH="main"
 GITHUB_REPO=""
@@ -104,6 +105,7 @@ while [[ "$#" -gt 0 ]]; do
     --download-all-files=*) DOWNLOAD_ALL="${1#*=}" ;;
     --http-accept-gzip=*)  COMPRESSION="${1#*=}" ;;
     --use-aria2) USE_ARIA2=true ;;
+    --use-surge) USE_SURGE=true ;;
     --use-curl) USE_CURL=true ;;
     --use-wget) USE_WGET=true ;;
     --use-git)             USE_GIT=true ;;
@@ -248,10 +250,11 @@ elif [[ "$USE_WGET" == "true" ]]; then
     send_notification "Success" "Downloaded $URL"
     exit 0
   fi
-elif [[ "$USE_ARIA2" != "true" ]] && [[ "$DOWNLOAD_ALL" != "true" ]] && \
+elif [[ "$USE_SURGE" == "true" ]] || \
+    ( [[ "$USE_ARIA2" != "true" ]] && [[ "$DOWNLOAD_ALL" != "true" ]] && \
     [[ "$URL" == http://* || "$URL" == https://* ]] && \
     [[ "$URL" != *"api.github.com"* ]] && \
-    [[ -n "$SURGE" ]] && [[ -x "$SURGE" ]]; then
+    [[ -n "$SURGE" ]] && [[ -x "$SURGE" ]] ); then
   echo "Attempt $ATTEMPT (surge)..." | tee -a "$LOGFILE"
   if "$SURGE" "$URL" -o "$DIRPATH/$OUTFILE" --exit-when-done; then
     send_notification "Success" "Downloaded $URL"
