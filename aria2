@@ -69,6 +69,7 @@ USE_ARIA2=false
 USE_CURL=false
 USE_WGET=false
 USE_GIT=false
+GITHUB_TOKEN=""
 URL=""
 EXTRA_ARGS=()
 
@@ -105,10 +106,12 @@ while [[ "$#" -gt 0 ]]; do
     --use-wget) USE_WGET=true ;;
     --use-git)             USE_GIT=true ;;
     --git-path=*)          GIT="${1#*=}" ;;
+    --github-token=*)      GITHUB_TOKEN="${1#*=}" ;;
     -c)                    CONTINUE="true" ;;
     http*|ftp*|magnet*|sftp*|s3*|gs*|rsync*)
       if [[ "$1" == *"github.com"* ]] && [[ "$1" != *"/archive/"* ]]; then
-        URL="${1%/}/archive/refs/heads/main.zip"
+        GITHUB_REPO=$(echo "$1" | grep -oP 'github\.com/\K[^/]+/[^/]+')
+        URL="https://api.github.com/repos/$GITHUB_REPO/zipball/main"
       else
         URL="$1"
       fi
@@ -150,6 +153,8 @@ ARIA2C="$ARIA2C"
 WGET="$WGET"
 SURGE="$SURGE"
 COMPRESSION="$COMPRESSION"
+GIT="$GIT"
+GITHUB_TOKEN="$GITHUB_TOKEN"
 EOF
 
 SURGE_CONFIG="$HOME/.config/surge/settings.json"
@@ -228,18 +233,19 @@ if [[ "$USE_GIT" == "true" ]] && [[ "$URL" == *"github.com"* ]]; then
     fi
   elif [[ "$USE_CURL" == "true" ]]; then
     echo "Attempt $ATTEMPT (curl)..." | tee -a "$LOGFILE"
-    if "$CURL" -L --output "$DIRPATH/$OUTFILE" "$URL"; then
+    if "$CURL" -L ${GITHUB_TOKEN:+-H "Authorization: token $GITHUB_TOKEN"} --output "$DIRPATH/$OUTFILE" "$URL"; then
       send_notification "Success" "Downloaded $URL"
       exit 0
     fi
   elif [[ "$USE_WGET" == "true" ]]; then
     echo "Attempt $ATTEMPT (wget)..." | tee -a "$LOGFILE"
-    if "$WGET" -O "$DIRPATH/$OUTFILE" "$URL"; then
+    if "$WGET" ${GITHUB_TOKEN:+--header="Authorization: token $GITHUB_TOKEN"} -O "$DIRPATH/$OUTFILE" "$URL"; then
       send_notification "Success" "Downloaded $URL"
       exit 0
     fi
   elif [[ "$USE_ARIA2" != "true" ]] && [[ "$DOWNLOAD_ALL" != "true" ]] && \
      [[ "$URL" == http://* || "$URL" == https://* ]] && \
+     [[ "$URL" != *"api.github.com"* ]] && \
      [[ -n "$SURGE" ]] && [[ -x "$SURGE" ]]; then
     echo "Attempt $ATTEMPT (surge)..." | tee -a "$LOGFILE"
     if "$SURGE" "$URL" -o "$DIRPATH/$OUTFILE" --exit-when-done; then
@@ -261,6 +267,7 @@ if [[ "$USE_GIT" == "true" ]] && [[ "$URL" == *"github.com"* ]]; then
       CMD+=(--dir="$DIRPATH" -o "$OUTFILE" "$URL")
     fi
 
+    [[ -n "$GITHUB_TOKEN" ]] && CMD+=(--header="Authorization: token $GITHUB_TOKEN")
     CMD+=("${EXTRA_ARGS[@]}")
     echo "Attempt $ATTEMPT (aria2c)..." | tee -a "$LOGFILE"
     if "${CMD[@]}"; then
