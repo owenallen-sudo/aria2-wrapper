@@ -228,7 +228,7 @@ if [[ "$USE_GIT" == "true" ]] && [[ -n "$GITHUB_REPO" ]]; then
     if "$GIT" clone --branch "$GITHUB_BRANCH" "$AUTH_URL" "$CLONE_DIR"; then
       send_notification "Success" "Cloned $GITHUB_REPO"
       exit 0
-      fi
+    fi
   else
     if "$GIT" clone --branch "$GITHUB_BRANCH" "https://github.com/$GITHUB_REPO" "$CLONE_DIR"; then
       send_notification "Success" "Cloned $GITHUB_REPO"
@@ -240,7 +240,7 @@ elif [[ "$USE_CURL" == "true" ]]; then
   if "$CURL" -L ${GITHUB_TOKEN:+-H "Authorization: token $GITHUB_TOKEN"} --output "$DIRPATH/$OUTFILE" "$URL"; then
     send_notification "Success" "Downloaded $URL"
     exit 0
-    fi
+  fi
 elif [[ "$USE_WGET" == "true" ]]; then
   echo "Attempt $ATTEMPT (wget)..." | tee -a "$LOGFILE"
   if "$WGET" ${GITHUB_TOKEN:+--header="Authorization: token $GITHUB_TOKEN"} -O "$DIRPATH/$OUTFILE" "$URL"; then
@@ -269,7 +269,6 @@ else
       CMD+=(--input-file="$INPUT_FILE")
     else
       CMD+=(--dir="$DIRPATH" -o "$OUTFILE" "$URL")
-    fi
 
     [[ -n "$GITHUB_TOKEN" ]] && CMD+=(--header="Authorization: token $GITHUB_TOKEN")
     CMD+=("${EXTRA_ARGS[@]}")
