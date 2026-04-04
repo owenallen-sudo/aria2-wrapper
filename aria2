@@ -70,6 +70,8 @@ USE_CURL=false
 USE_WGET=false
 USE_GIT=false
 GITHUB_TOKEN=""
+GITHUB_BRANCH="main"
+GITHUB_REPO=""
 URL=""
 EXTRA_ARGS=()
 
@@ -107,11 +109,12 @@ while [[ "$#" -gt 0 ]]; do
     --use-git)             USE_GIT=true ;;
     --git-path=*)          GIT="${1#*=}" ;;
     --github-token=*)      GITHUB_TOKEN="${1#*=}" ;;
+    --branch=*)            GITHUB_BRANCH="${1#*=}" ;;
     -c)                    CONTINUE="true" ;;
     http*|ftp*|magnet*|sftp*|s3*|gs*|rsync*)
       if [[ "$1" == *"github.com"* ]] && [[ "$1" != *"/archive/"* ]]; then
         GITHUB_REPO=$(echo "$1" | grep -oP 'github\.com/\K[^/]+/[^/]+')
-        URL="https://api.github.com/repos/$GITHUB_REPO/zipball/main"
+        URL="https://api.github.com/repos/$GITHUB_REPO/zipball/$GITHUB_BRANCH"
       else
         URL="$1"
       fi
@@ -217,47 +220,48 @@ ATTEMPT=0
 while [[ $ATTEMPT -lt $MAX_SCRIPT_TRIES ]]; do
   ((ATTEMPT++))
 
-if [[ "$USE_GIT" == "true" ]] && [[ "$URL" == *"github.com"* ]]; then
-    echo "Attempt $ATTEMPT (git)..." | tee -a "$LOGFILE"
-    if [[ -n "$GITHUB_TOKEN" ]]; then
-      AUTH_URL=$(echo "$URL" | sed "s|https://|https://$GITHUB_TOKEN@|")
-      if "$GIT" clone "$AUTH_URL" "$DIRPATH/$OUTFILE"; then
-        send_notification "Success" "Cloned $URL"
-        exit 0
+if [[ "$USE_GIT" == "true" ]] && [[ -n "$GITHUB_REPO" ]]; then
+  echo "Attempt $ATTEMPT (git)..." | tee -a "$LOGFILE"
+  CLONE_DIR="$DIRPATH/$(basename "$GITHUB_REPO")"
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    AUTH_URL="https://$GITHUB_TOKEN@github.com/$GITHUB_REPO"
+    if "$GIT" clone --branch "$GITHUB_BRANCH" "$AUTH_URL" "$CLONE_DIR"; then
+      send_notification "Success" "Cloned $GITHUB_REPO"
+      exit 0
       fi
-    else
-      if "$GIT" clone "$URL" "$DIRPATH/$OUTFILE"; then
-        send_notification "Success" "Cloned $URL"
-        exit 0
-      fi
-    fi
-  elif [[ "$USE_CURL" == "true" ]]; then
-    echo "Attempt $ATTEMPT (curl)..." | tee -a "$LOGFILE"
-    if "$CURL" -L ${GITHUB_TOKEN:+-H "Authorization: token $GITHUB_TOKEN"} --output "$DIRPATH/$OUTFILE" "$URL"; then
-      send_notification "Success" "Downloaded $URL"
-      exit 0
-    fi
-  elif [[ "$USE_WGET" == "true" ]]; then
-    echo "Attempt $ATTEMPT (wget)..." | tee -a "$LOGFILE"
-    if "$WGET" ${GITHUB_TOKEN:+--header="Authorization: token $GITHUB_TOKEN"} -O "$DIRPATH/$OUTFILE" "$URL"; then
-      send_notification "Success" "Downloaded $URL"
-      exit 0
-    fi
-  elif [[ "$USE_ARIA2" != "true" ]] && [[ "$DOWNLOAD_ALL" != "true" ]] && \
-     [[ "$URL" == http://* || "$URL" == https://* ]] && \
-     [[ "$URL" != *"api.github.com"* ]] && \
-     [[ -n "$SURGE" ]] && [[ -x "$SURGE" ]]; then
-    echo "Attempt $ATTEMPT (surge)..." | tee -a "$LOGFILE"
-    if "$SURGE" "$URL" -o "$DIRPATH/$OUTFILE" --exit-when-done; then
-      send_notification "Success" "Downloaded $URL"
-      exit 0
-    fi
   else
-    CMD=("$ARIA2C" -x "$STREAMS" -s "$STREAMS" --max-tries="$MAX_TRIES_INSIDE_ARIA2C" \
-         --retry-wait="$RETRY_WAIT" --timeout="$TIMEOUT" --check-certificate="$CHECK_CERT" \
-         --save-session="$SESSION_FILE" --save-session-interval="$SAVING_INTERVAL" \
-         --allow-overwrite="$ALLOW_OVERWRITE" --file-allocation="$FILE_ALLOCATION" \
-         --max-overall-download-limit="$DOWNLOAD_LIMIT" --max-overall-upload-limit="$UPLOAD_LIMIT")
+    if "$GIT" clone --branch "$GITHUB_BRANCH" "https://github.com/$GITHUB_REPO" "$CLONE_DIR"; then
+      send_notification "Success" "Cloned $GITHUB_REPO"
+      exit 0
+    fi
+  fi
+elif [[ "$USE_CURL" == "true" ]]; then
+  echo "Attempt $ATTEMPT (curl)..." | tee -a "$LOGFILE"
+  if "$CURL" -L ${GITHUB_TOKEN:+-H "Authorization: token $GITHUB_TOKEN"} --output "$DIRPATH/$OUTFILE" "$URL"; then
+    send_notification "Success" "Downloaded $URL"
+    exit 0
+    fi
+elif [[ "$USE_WGET" == "true" ]]; then
+  echo "Attempt $ATTEMPT (wget)..." | tee -a "$LOGFILE"
+  if "$WGET" ${GITHUB_TOKEN:+--header="Authorization: token $GITHUB_TOKEN"} -O "$DIRPATH/$OUTFILE" "$URL"; then
+    send_notification "Success" "Downloaded $URL"
+    exit 0
+  fi
+elif [[ "$USE_ARIA2" != "true" ]] && [[ "$DOWNLOAD_ALL" != "true" ]] && \
+    [[ "$URL" == http://* || "$URL" == https://* ]] && \
+    [[ "$URL" != *"api.github.com"* ]] && \
+    [[ -n "$SURGE" ]] && [[ -x "$SURGE" ]]; then
+  echo "Attempt $ATTEMPT (surge)..." | tee -a "$LOGFILE"
+  if "$SURGE" "$URL" -o "$DIRPATH/$OUTFILE" --exit-when-done; then
+    send_notification "Success" "Downloaded $URL"
+    exit 0
+  fi
+else
+  CMD=("$ARIA2C" -x "$STREAMS" -s "$STREAMS" --max-tries="$MAX_TRIES_INSIDE_ARIA2C" \
+        --retry-wait="$RETRY_WAIT" --timeout="$TIMEOUT" --check-certificate="$CHECK_CERT" \
+        --save-session="$SESSION_FILE" --save-session-interval="$SAVING_INTERVAL" \
+        --allow-overwrite="$ALLOW_OVERWRITE" --file-allocation="$FILE_ALLOCATION" \
+        --max-overall-download-limit="$DOWNLOAD_LIMIT" --max-overall-upload-limit="$UPLOAD_LIMIT")
 
     if [[ "$DOWNLOAD_ALL" == "true" ]]; then
       INPUT_FILE="$DIRPATH/crawl.txt"
