@@ -198,6 +198,7 @@ detect_folder_url() {
 }
 
 # --- Execution ---
+[[ -n "$GITHUB_REPO" ]] && URL="https://api.github.com/repos/$GITHUB_REPO/zipball/$GITHUB_BRANCH"
 if [[ -z "$URL" ]]; then echo "Error: No URL."; exit 1; fi
 
 # Path logic
@@ -263,21 +264,22 @@ else
         --allow-overwrite="$ALLOW_OVERWRITE" --file-allocation="$FILE_ALLOCATION" \
         --max-overall-download-limit="$DOWNLOAD_LIMIT" --max-overall-upload-limit="$UPLOAD_LIMIT")
 
-    if [[ "$DOWNLOAD_ALL" == "true" ]]; then
-      INPUT_FILE="$DIRPATH/crawl.txt"
-      build_aria2_input "$URL" "$DIRPATH" "$INPUT_FILE"
-      CMD+=(--input-file="$INPUT_FILE")
-    else
-      CMD+=(--dir="$DIRPATH" -o "$OUTFILE" "$URL")
-
-    [[ -n "$GITHUB_TOKEN" ]] && CMD+=(--header="Authorization: token $GITHUB_TOKEN")
-    CMD+=("${EXTRA_ARGS[@]}")
-    echo "Attempt $ATTEMPT (aria2c)..." | tee -a "$LOGFILE"
-    if "${CMD[@]}"; then
-      send_notification "Success" "Downloaded $URL"
-      exit 0
-    fi
+  if [[ "$DOWNLOAD_ALL" == "true" ]]; then
+    INPUT_FILE="$DIRPATH/crawl.txt"
+    build_aria2_input "$URL" "$DIRPATH" "$INPUT_FILE"
+    CMD+=(--input-file="$INPUT_FILE")
+  else
+    CMD+=(--dir="$DIRPATH" -o "$OUTFILE" "$URL")
   fi
+
+  [[ -n "$GITHUB_TOKEN" ]] && CMD+=(--header="Authorization: token $GITHUB_TOKEN")
+  CMD+=("${EXTRA_ARGS[@]}")
+  echo "Attempt $ATTEMPT (aria2c)..." | tee -a "$LOGFILE"
+  if "${CMD[@]}"; then
+    send_notification "Success" "Downloaded $URL"
+    exit 0
+  fi
+fi
   sleep 2
 done
 
