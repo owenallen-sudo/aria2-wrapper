@@ -259,7 +259,7 @@ download <URL> fast
 download removeflag fast
 ```
 
-Stored in `~/.config/aria2dl/flags` as `flagname:--aria2c-flag`. Custom flags are passed to aria2c only and ignored by all other tools.
+Stored in `~/.config/download/flags` as `flagname:--aria2c-flag`. Custom flags are passed to aria2c only and ignored by all other tools.
 
 ---
 
