@@ -1,33 +1,40 @@
 # download
 
-A Bash wrapper for downloading files using multiple tools with persistent config, retries, directory crawling, GitHub support, and custom flag aliases. It uses the Mozilla Public License V. 2.0.
+A Bash wrapper for downloading files using multiple tools with persistent config, retries, directory crawling, GitHub support, torrent support, zsync delta updates, and custom flag aliases. It uses the Mozilla Public License V. 2.0.
 
 ---
 
 ## How It Works
 
-By default the script picks the best tool automatically:
+The script automatically selects the best tool based on the URL and flags:
 
-- **Surge** — used for `http`/`https` URLs (fastest for direct downloads)
-- **Wget** — used for crawling URL folders to find all the filenames and structure without actually downloading.
-- **aria2c** — used for everything else (`ftp`, `magnet`, `sftp`, `s3`, `gs`, `rsync`, folder crawling, GitHub API downloads, etc.)
+- **Surge** — default for `http`/`https` URLs (fastest for direct downloads)
+- **lftp** — automatically used for `ftp`/`sftp` URLs
+- **transmission-remote** — automatically used for `magnet:` URLs and `.torrent` files
+- **zsync** — automatically used when `--old-version` is passed (delta updates)
+- **git** — default for non-http/https GitHub URLs (configurable via `--github-default`)
+- **aria2c** — default for everything else, and fallback when no other tool applies
 
-You can override this with `--use-aria2`, `--use-curl`, `--use-wget`, `--use-surge`, or `--use-git` where it uses that one for downloading.
+All `--use-*` flags override automatic detection for edge cases or personal preference.
 
 ---
 
 ## Dependencies
 
-Only one tool is strictly required, but installing all gives full functionality:
+Only aria2c is strictly required, but installing all tools gives full functionality:
 
 | Tool | Required? | Used For |
 |------|-----------|----------|
-| `aria2c` | Recommended | Non-HTTP downloads, folder crawling, GitHub private repos |
+| `aria2c` | Recommended | Default for most protocols, folder crawling, fallback |
 | `surge` | Recommended | Fast HTTP/HTTPS downloads (default for http/https) |
-| `curl` | Recommended | Notifications, folder detection, `--use-curl` mode |
-| `wget` | Recommended | Folder crawling, `--use-wget` mode |
-| `git` | Optional | `--use-git` cloning of GitHub repos |
-| `jq` | Optional | Syncing stream count to surge's config |
+| `curl` | Recommended | Notifications, folder URL detection, `--use-curl` mode |
+| `wget` | Recommended | Folder crawling (spider mode), `--use-wget` mode |
+| `lftp` | Recommended | FTP/SFTP downloads (auto-selected) |
+| `transmission-remote` | Recommended | Torrent/magnet downloads (auto-selected) |
+| `zsync` | Recommended | Delta updates for ISOs and large files (auto-selected) |
+| `git` | Optional | GitHub repo cloning via `--use-git` or `--github-default=git` |
+| `trickle` | Optional | Speed limiting for git (which has no native speed limit) |
+| `jq` | Optional | Syncing connection count to surge's config |
 
 ---
 
@@ -37,11 +44,14 @@ Only one tool is strictly required, but installing all gives full functionality:
 download <URL> [options]
 ```
 
-Example:
+Examples:
 ```bash
 download https://example.com/file.zip --streams=16 --download-limit=1M
-download https://github.com/user/repo --branch=dev --use-git
+download https://github.com/user/repo --github-branch=dev --use-git
 download magnet:?xt=... --filepath=~/Downloads/
+download ftp://example.com/file.tar.gz
+download https://distro.org/latest.iso --old-version=~/old.iso
+download https://example.com/file.zip --use-transmission-remote
 ```
 
 ---
@@ -51,15 +61,21 @@ download magnet:?xt=... --filepath=~/Downloads/
 ### Tool Selection
 
 * `--use-surge`
-  Force surge regardless of protocol (useful if surge adds new protocol support)
+  Force surge regardless of protocol
 * `--use-aria2`
-  Force aria2c instead of surge for http/https
+  Force aria2c
 * `--use-curl`
   Force curl
 * `--use-wget`
   Force wget
 * `--use-git`
   Clone GitHub repo with git instead of downloading a zipball
+* `--use-lftp`
+  Force lftp
+* `--use-zsync`
+  Force zsync
+* `--use-transmission-remote`
+  Force transmission-remote
 
 ---
 
@@ -70,20 +86,22 @@ download magnet:?xt=... --filepath=~/Downloads/
 * `--continue=true|false`, `-c`
   Resume download
 * `--download-all-files=true|false`
-  Force directory crawling (always uses aria2c)
+  Force directory crawling (uses wget + aria2c)
 * `--file-allocation=<mode>`
   File allocation method (aria2c only)
+* `--buffer-size=<size>`
+  Buffer/chunk size synced to all tools that support it e.g. `4M`, `1M` (default: `4M`)
 
 ---
 
 ### Performance
 
 * `--streams=<n>`
-  Connections per download (aria2c; also synced to surge's `max_connections_per_host` in its config)
+  Connections per download — synced to surge, lftp, and aria2c (default: `12`)
 * `--download-limit=<rate>`
-  Max download speed e.g. `750K`, `2M` (aria2c only)
+  Max download speed e.g. `750K`, `2M` — applies to aria2c, curl, wget, lftp, and git via trickle
 * `--upload-limit=<rate>`
-  Max upload speed (aria2c only)
+  Max upload speed — applies to aria2c, lftp, transmission-remote, and git via trickle
 * `--timeout=<seconds>`
   Connection timeout (aria2c only)
 * `--uri-selector=<method>`
@@ -93,10 +111,25 @@ download magnet:?xt=... --filepath=~/Downloads/
 
 ---
 
+### Speed Limits Per Tool
+
+Each tool's speed limiting can be toggled independently:
+
+* `--aria2-speed-limits=true|false`
+* `--curl-speed-limits=true|false`
+* `--wget-speed-limits=true|false`
+* `--git-speed-limits=true|false` (uses trickle)
+* `--lftp-speed-limits=true|false`
+* `--transmission-speed-limits=true|false`
+
+All default to `true`. Useful on very limited wifi to reduce bufferbloat by limiting specific tools.
+
+---
+
 ### Retry
 
 * `--max-script-attempts=<n>`
-  How many times the wrapper retries the download
+  How many times the wrapper retries the whole download (default: `3`)
 * `--max-tries-inside-aria2=<n>`
   How many times aria2c retries internally (aria2c only)
 * `--retry-inside-aria2-wait=<sec>`
@@ -123,11 +156,35 @@ download magnet:?xt=... --filepath=~/Downloads/
 ### GitHub
 
 * `--github-token=<token>`
-  Personal access token for private repos (works with aria2c, curl, wget and git)
-* `--branch=<branch>`
+  Personal access token for private repos — works with aria2c, curl, wget, and git
+* `--github-branch=<branch>`
   Branch to download or clone (default: `main`)
+* `--github-default=<tool>`
+  Default tool for non-http/https GitHub URLs. Options: `git`, `aria2c`, `aria2`, `curl`, `wget`, `lftp`, `transmission-remote` (default: `git`)
+* `--depth=<n>`
+  Shallow clone depth for git (omit for full history)
 
-GitHub URLs are automatically transformed to use the GitHub API zipball endpoint. With `--use-git`, the repo is cloned directly instead.
+GitHub `http`/`https` URLs are always handled by surge by default via the GitHub API zipball endpoint. Non-http/https GitHub URLs default to git clone. Private repos work automatically when `--github-token` is set. If a repo has already been cloned, `git fetch` is used instead of `git clone` on subsequent runs.
+
+---
+
+### zsync
+
+* `--update`
+  Enable zsync update mode
+* `--old-version=<path>`
+  Path to the existing local file to diff against — automatically enables zsync
+
+Useful for keeping Linux ISOs up to date without downloading the full image each time. Only works if the server provides a `.zsync` file alongside the download.
+
+---
+
+### Transmission
+
+* `--transmission-host=<host:port>`
+  Transmission daemon host (default: `localhost:9091`)
+* `--transmission-auth=<user:pass>`
+  Authentication for the Transmission daemon
 
 ---
 
@@ -147,24 +204,27 @@ GitHub URLs are automatically transformed to use the GitHub API zipball endpoint
 * `--aria2-path=<path>`
 * `--surge-path=<path>`
 * `--git-path=<path>`
+* `--lftp-path=<path>`
+* `--zsync-path=<path>`
+* `--transmission-path=<path>`
 
 ---
 
 ## URL Support
 
-Supported protocols matched automatically:
+Protocols are matched and routed automatically:
 
-- `http`, `https` → surge (default) or aria2c
-- `ftp` → aria2c
-- `magnet` → aria2c
-- `sftp` → aria2c
-- `s3`, `gs` → aria2c
-- `rsync` → aria2c
-- Any URL containing `://` → treated as a URL regardless of protocol
+| Protocol | Default Tool |
+|----------|-------------|
+| `http`, `https` | surge |
+| `ftp`, `sftp` | lftp |
+| `magnet:`, `.torrent` | transmission-remote |
+| `s3`, `gs`, `rsync` | aria2c |
+| GitHub http/https | surge (zipball via API) |
+| GitHub non-http | git |
+| Any `://` URL | treated as URL regardless of protocol |
 
-If the URL is a directory (ends with `/` or resolves to one), files are crawled and downloaded recursively using wget + aria2c.
-
-GitHub URLs are automatically handled — private repos work with `--github-token`.
+Directory URLs (ending with `/` or resolving to one) are crawled recursively using wget + aria2c.
 
 ---
 
@@ -175,7 +235,7 @@ Stored at:
 ~/.config/aria2dl/config
 ```
 
-Last used values for most settings are saved and reused on the next run. Tool paths, limits, retry counts, tokens, and notification settings all persist. Branch and per-download settings do not persist.
+Most settings persist between runs including tool paths, speed limits, retry counts, tokens, buffer size, stream count, and notification settings. The stream count is also automatically synced to surge's `~/.config/surge/settings.json` and lftp's `~/.lftp/rc` on every run.
 
 ---
 
@@ -207,7 +267,7 @@ Format:
 fast:--min-split-size=1M
 ```
 
-Note: custom flags are passed to aria2c only and are ignored when surge, curl, wget or git is used.
+Custom flags are passed to aria2c only and ignored by all other tools.
 
 ---
 
