@@ -245,7 +245,7 @@ Directory URLs (ending with `/` or resolving to one) are crawled recursively usi
 
 ## Config
 
-Stored at `~/.config/aria2dl/config`. Most settings persist between runs including tool paths, speed limits, retry counts, tokens, buffer size, stream count, and notification settings. The stream count is automatically synced to surge's `~/.config/surge/settings.json` and lftp's `~/.lftp/rc` on every run.
+Stored at `~/.config/download/config`. Most settings persist between runs including tool paths, speed limits, retry counts, tokens, buffer size, stream count, and notification settings. The stream count is automatically synced to surge's `~/.config/surge/settings.json` and lftp's `~/.lftp/rc` on every run.
 
 ---
 
