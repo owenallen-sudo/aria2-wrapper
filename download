@@ -1,4 +1,4 @@
-#!/bin/bash
+ #!/bin/bash
 # This Source code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 # It is a breach of the license terms to distribute this file without the Mozilla Public License v. 2.0, it states that any distributed version of this file must be open-source etc.
@@ -46,6 +46,15 @@ SURGE="/usr/bin/surge"
 GIT="/usr/bin/git"
 [[ ! -x "$GIT" ]] && GIT=$(command -v git)
 
+LFTP="/usr/bin/lftp"
+[[ ! -x "$LFTP" ]] && LFTP=$(command -v lftp)
+
+ZSYNC="/usr/bin/zsync"
+[[ ! -x "$ZSYNC" ]] && ZSYNC=$(command -v zsync)
+
+TRANSMISSION="/usr/bin/transmission-remote"
+[[ ! -x "$TRANSMISSION" ]] && TRANSMISSION=$(command -v transmission-remote)
+
 TRICKLE="/usr/bin/trickle"
 [[ ! -x "$TRICKLE" ]] && TRICKLE=$(command -v trickle)
 
@@ -73,6 +82,16 @@ USE_CURL=false
 USE_WGET=false
 USE_GIT=false
 USE_SURGE=false
+USE_LFTP=false
+USE_ZSYNC=false
+USE_TRANSMISSION=false
+LFTP_SPEED_LIMITS=true
+TRANSMISSION_SPEED_LIMITS=true
+ZSYNC_UPDATE=false
+ZSYNC_OLD_VERSION=""
+BUFFER_SIZE="4M"
+TRANSMISSION_HOST="localhost:9091"
+TRANSMISSION_AUTH=""
 ARIA2_SPEED_LIMITS=true
 CURL_SPEED_LIMITS=true
 WGET_SPEED_LIMITS=true
@@ -81,6 +100,7 @@ GIT_DEPTH=""
 GITHUB_TOKEN=""
 GITHUB_BRANCH="main"
 GITHUB_REPO=""
+GITHUB_DEFAULT="git"
 URL=""
 EXTRA_ARGS=()
 
@@ -90,46 +110,70 @@ EXTRA_ARGS=()
 # Parse flags
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    --check-certificate=*) CHECK_CERT="${1#*=}" ;;
-    --download-limit=*)    DOWNLOAD_LIMIT="${1#*=}" ;;
-    --upload-limit=*)      UPLOAD_LIMIT="${1#*=}" ;;
-    --streams=*)           STREAMS="${1#*=}" ;;
-    --max-script-attempts=*) MAX_SCRIPT_TRIES="${1#*=}" ;;
-    --filepath=*)          FILEPATH="${1#*=}" ;;
-    --file-allocation=*)   FILE_ALLOCATION="${1#*=}" ;;
-    --timeout=*)           TIMEOUT="${1#*=}" ;;
-    --uri-selector=*)      URI_SELECTOR="${1#*=}" ;;
-    --max-tries-inside-aria2=*) MAX_TRIES_INSIDE_ARIA2C="${1#*=}" ;;
-    --retry-inside-aria2-wait=*) RETRY_WAIT="${1#*=}" ;;
-    --saving-interval=*)   SAVING_INTERVAL="${1#*=}" ;;
-    --allow-overwrite=*)   ALLOW_OVERWRITE="${1#*=}" ;;
-    --ntfy-topic=*)        NTFY_TOPIC="${1#*=}" ;;
-    --ntfy-enabled=*)      NTFY_ENABLED="${1#*=}" ;;
-    --curl-path=*)         CURL="${1#*=}" ;;
-    --wget-path=*)         WGET="${1#*=}" ;;
-    --aria2-path=*)        ARIA2C="${1#*=}" ;; 
-    --surge-path=*)         SURGE="${1#*=}" ;;
-    --continue=*)          CONTINUE="${1#*=}" ;;
-    --download-all-files=*) DOWNLOAD_ALL="${1#*=}" ;;
-    --http-accept-gzip=*)  COMPRESSION="${1#*=}" ;;
-    --use-aria2) USE_ARIA2=true ;;
-    --use-surge) USE_SURGE=true ;;
-    --use-curl) USE_CURL=true ;;
-    --use-wget) USE_WGET=true ;;
-    --use-git)             USE_GIT=true ;;
-    --depth=*) GIT_DEPTH="${1#*=}" ;;
-    --git-path=*)          GIT="${1#*=}" ;;
-    --github-token=*)      GITHUB_TOKEN="${1#*=}" ;;
-    --github-branch=*)            GITHUB_BRANCH="${1#*=}" ;;
-    --aria2-speed-limits=*) ARIA2_SPEED_LIMITS="${1#*=}" ;;
-    --curl-speed-limits=*)  CURL_SPEED_LIMITS="${1#*=}" ;;
-    --wget-speed-limits=*)  WGET_SPEED_LIMITS="${1#*=}" ;;
-    --git-speed-limits=*)   GIT_SPEED_LIMITS="${1#*=}" ;;
-    -c)                    CONTINUE="true" ;;
+    --check-certificate=*)         CHECK_CERT="${1#*=}" ;;
+    --download-limit=*)            DOWNLOAD_LIMIT="${1#*=}" ;;
+    --upload-limit=*)              UPLOAD_LIMIT="${1#*=}" ;;
+    --streams=*)                   STREAMS="${1#*=}" ;;
+    --max-script-attempts=*)       MAX_SCRIPT_TRIES="${1#*=}" ;;
+    --filepath=*)                  FILEPATH="${1#*=}" ;;
+    --file-allocation=*)           FILE_ALLOCATION="${1#*=}" ;;
+    --timeout=*)                   TIMEOUT="${1#*=}" ;;
+    --uri-selector=*)              URI_SELECTOR="${1#*=}" ;;
+    --max-tries-inside-aria2=*)    MAX_TRIES_INSIDE_ARIA2C="${1#*=}" ;;
+    --retry-inside-aria2-wait=*)   RETRY_WAIT="${1#*=}" ;;
+    --saving-interval=*)           SAVING_INTERVAL="${1#*=}" ;;
+    --allow-overwrite=*)           ALLOW_OVERWRITE="${1#*=}" ;;
+    --ntfy-topic=*)                NTFY_TOPIC="${1#*=}" ;;
+    --ntfy-enabled=*)              NTFY_ENABLED="${1#*=}" ;;
+    --curl-path=*)                 CURL="${1#*=}" ;;
+    --wget-path=*)                 WGET="${1#*=}" ;;
+    --aria2-path=*)                ARIA2C="${1#*=}" ;; 
+    --surge-path=*)                SURGE="${1#*=}" ;;
+    --continue=*)                  CONTINUE="${1#*=}" ;;
+    --download-all-files=*)        DOWNLOAD_ALL="${1#*=}" ;;
+    --http-accept-gzip=*)          COMPRESSION="${1#*=}" ;;
+    --use-aria2)                   USE_ARIA2=true ;;
+    --use-surge)                   USE_SURGE=true ;;
+    --use-curl)                    USE_CURL=true ;;
+    --use-wget)                    USE_WGET=true ;;
+    --use-git)                     USE_GIT=true ;;
+    --depth=*)                     GIT_DEPTH="${1#*=}" ;;
+    --git-path=*)                  GIT="${1#*=}" ;;
+    --github-token=*)              GITHUB_TOKEN="${1#*=}" ;;
+    --github-branch=*)             GITHUB_BRANCH="${1#*=}" ;;
+    --github-default=*)            GITHUB_DEFAULT="${1#*=}" ;;
+    --aria2-speed-limits=*)        ARIA2_SPEED_LIMITS="${1#*=}" ;;
+    --curl-speed-limits=*)         CURL_SPEED_LIMITS="${1#*=}" ;;
+    --wget-speed-limits=*)         WGET_SPEED_LIMITS="${1#*=}" ;;
+    --git-speed-limits=*)          GIT_SPEED_LIMITS="${1#*=}" ;;
+    --use-lftp)                    USE_LFTP=true ;;
+    --use-zsync)                   USE_ZSYNC=true ;;
+    --use-transmission-remote)     USE_TRANSMISSION=true ;;
+    --lftp-path=*)                 LFTP="${1#*=}" ;;
+    --zsync-path=*)                ZSYNC="${1#*=}" ;;
+    --transmission-path=*)         TRANSMISSION="${1#*=}" ;;
+    --lftp-speed-limits=*)         LFTP_SPEED_LIMITS="${1#*=}" ;;
+    --transmission-speed-limits=*) TRANSMISSION_SPEED_LIMITS="${1#*=}" ;;
+    --update)                      ZSYNC_UPDATE=true ;;
+    --old-version=*)               ZSYNC_OLD_VERSION="${1#*=}" ;;
+    --buffer-size=*)               BUFFER_SIZE="${1#*=}" ;;
+    --transmission-host=*)         TRANSMISSION_HOST="${1#*=}" ;;
+    --transmission-auth=*)         TRANSMISSION_AUTH="${1#*=}" ;;
+    -c)                            CONTINUE="true" ;;
     http*|ftp*|magnet*|sftp*|s3*|gs*|rsync*)
       if [[ "$1" == *"github.com"* ]] && [[ "$1" != *"/archive/"* ]]; then
         GITHUB_REPO=$(echo "$1" | grep -oP 'github\.com/\K[^/]+/[^/]+')
         URL="https://api.github.com/repos/$GITHUB_REPO/zipball/$GITHUB_BRANCH"
+        if [[ "$1" != http://* && "$1" != https://* ]]; then
+          case "$GITHUB_DEFAULT" in
+            git)                USE_GIT=true ;;
+            aria2c|aria2)       USE_ARIA2=true ;;
+            curl)               USE_CURL=true ;;
+            wget)               USE_WGET=true ;;
+            lftp)               USE_LFTP=true ;;
+            transmission-remote) USE_TRANSMISSION=true ;;
+          esac
+       fi
       else
         URL="$1"
       fi
@@ -150,41 +194,12 @@ while [[ "$#" -gt 0 ]]; do
       ;;
   esac
   shift
-done
+done 
 
-# Save back to config
-cat > "$CONFIG_FILE" <<EOF
-NTFY_TOPIC="$NTFY_TOPIC"
-STREAMS="$STREAMS"
-DOWNLOAD_LIMIT="$DOWNLOAD_LIMIT"
-UPLOAD_LIMIT="$UPLOAD_LIMIT"
-FILE_ALLOCATION="$FILE_ALLOCATION"
-TIMEOUT="$TIMEOUT"
-RETRY_WAIT="$RETRY_WAIT"
-MAX_TRIES_INSIDE_ARIA2C="$MAX_TRIES_INSIDE_ARIA2C"
-MAX_SCRIPT_TRIES="$MAX_SCRIPT_TRIES"
-SAVING_INTERVAL="$SAVING_INTERVAL"
-URI_SELECTOR="$URI_SELECTOR"
-NTFY_ENABLED="$NTFY_ENABLED"
-CURL="$CURL"
-ARIA2C="$ARIA2C"
-WGET="$WGET"
-SURGE="$SURGE"
-COMPRESSION="$COMPRESSION"
-GIT="$GIT"
-GITHUB_TOKEN="$GITHUB_TOKEN"
-TRICKLE="$TRICKLE"
-ARIA2_SPEED_LIMITS="$ARIA2_SPEED_LIMITS"
-CURL_SPEED_LIMITS="$CURL_SPEED_LIMITS"
-WGET_SPEED_LIMITS="$WGET_SPEED_LIMITS"
-GIT_SPEED_LIMITS="$GIT_SPEED_LIMITS"
-EOF
-
-SURGE_CONFIG="$HOME/.config/surge/settings.json"
-if [[ -f "$SURGE_CONFIG" ]] && command -v jq &>/dev/null; then
-  tmp=$(mktemp)
-  jq --argjson c "$STREAMS" '.network.max_connections_per_host = $c' "$SURGE_CONFIG" > "$tmp" && mv "$tmp" "$SURGE_CONFIG"
-fi
+      # Auto-detect tool based on URL and flags
+[[ -n "$ZSYNC_OLD_VERSION" ]] && ZSYNC_UPDATE=true && USE_ZSYNC=true
+[[ "$URL" == magnet:* || "$URL" == *.torrent ]] && USE_TRANSMISSION=true
+[[ "$URL" == ftp://* || "$URL" == sftp://* ]] && USE_LFTP=true
 
 # --- Helper Functions ---
 to_kbps() {
@@ -208,7 +223,7 @@ crawl_urls() {
 build_aria2_input() {
   local base_url="${1%/}" dest_dir="$2" input_file="$3"
   > "$input_file"
-  local count=0
+  local count=0 
   while IFS= read -r link; do
     local relative="${link#$base_url}"; relative="${relative#/}"
     local fdir=$(dirname "$relative"); local fname=$(basename "$relative")
@@ -225,6 +240,62 @@ detect_folder_url() {
   effective=$("$CURL" -sI -L -o /dev/null -w '%{url_effective}' "$1")
   [[ "$effective" == */ ]] && echo "true" || echo "false"
 }
+
+# Save back to config
+cat > "$CONFIG_FILE" <<EOF
+NTFY_TOPIC="$NTFY_TOPIC"
+STREAMS="$STREAMS"
+DOWNLOAD_LIMIT="$DOWNLOAD_LIMIT"
+UPLOAD_LIMIT="$UPLOAD_LIMIT"
+FILE_ALLOCATION="$FILE_ALLOCATION"
+TIMEOUT="$TIMEOUT"
+RETRY_WAIT="$RETRY_WAIT"
+MAX_TRIES_INSIDE_ARIA2C="$MAX_TRIES_INSIDE_ARIA2C"
+MAX_SCRIPT_TRIES="$MAX_SCRIPT_TRIES"
+SAVING_INTERVAL="$SAVING_INTERVAL"
+URI_SELECTOR="$URI_SELECTOR"
+NTFY_ENABLED="$NTFY_ENABLED"
+CURL="$CURL"
+ARIA2C="$ARIA2C"
+WGET="$WGET"
+SURGE="$SURGE"
+COMPRESSION="$COMPRESSION"
+GIT="$GIT"
+GITHUB_TOKEN="$GITHUB_TOKEN"
+GITHUB_DEFAULT="$GITHUB_DEFAULT"
+TRICKLE="$TRICKLE"
+LFTP="$LFTP"
+ZSYNC="$ZSYNC"
+TRANSMISSION="$TRANSMISSION"
+USE_LFTP="$USE_LFTP"
+USE_ZSYNC="$USE_ZSYNC"
+USE_TRANSMISSION="$USE_TRANSMISSION"
+LFTP_SPEED_LIMITS="$LFTP_SPEED_LIMITS"
+TRANSMISSION_SPEED_LIMITS="$TRANSMISSION_SPEED_LIMITS"
+BUFFER_SIZE="$BUFFER_SIZE"
+TRANSMISSION_HOST="$TRANSMISSION_HOST"
+TRANSMISSION_AUTH="$TRANSMISSION_AUTH"
+ARIA2_SPEED_LIMITS="$ARIA2_SPEED_LIMITS"
+CURL_SPEED_LIMITS="$CURL_SPEED_LIMITS"
+WGET_SPEED_LIMITS="$WGET_SPEED_LIMITS"
+GIT_SPEED_LIMITS="$GIT_SPEED_LIMITS"
+EOF
+
+SURGE_CONFIG="$HOME/.config/surge/settings.json"
+if [[ -f "$SURGE_CONFIG" ]] && command -v jq &>/dev/null; then
+  tmp=$(mktemp)
+  jq --argjson c "$STREAMS" '.network.max_connections_per_host = $c' "$SURGE_CONFIG" > "$tmp" && mv "$tmp" "$SURGE_CONFIG"
+fi
+
+LFTP_RC="$HOME/.lftp/rc"
+mkdir -p "$HOME/.lftp"
+cat > "$LFTP_RC" <<EOF
+set net:socket-buffer $(to_kbps "$BUFFER_SIZE")
+set pget:default-n $STREAMS
+set ftp:use-mdtm yes
+set net:reconnect-interval-base 5
+set net:max-retries 99
+EOF
 
 # --- Execution ---
 [[ -n "$GITHUB_REPO" ]] && URL="https://api.github.com/repos/$GITHUB_REPO/zipball/$GITHUB_BRANCH"
@@ -257,12 +328,14 @@ if [[ "$USE_GIT" == "true" ]] && [[ -n "$GITHUB_REPO" ]]; then
   if [[ "$GIT_SPEED_LIMITS" == "true" ]] && [[ -n "$TRICKLE" ]] && [[ -x "$TRICKLE" ]]; then
     GIT_CMD=("$TRICKLE" -d "$(to_kbps "$DOWNLOAD_LIMIT")" -u "$(to_kbps "$UPLOAD_LIMIT")" "$GIT")
   fi
+
   if [[ -d "$CLONE_DIR/.git" ]]; then
     if "${GIT_CMD[@]}" -C "$CLONE_DIR" fetch origin "$GITHUB_BRANCH" && \
        "${GIT_CMD[@]}" -C "$CLONE_DIR" checkout "$GITHUB_BRANCH"; then
       send_notification "Success" "Updated $GITHUB_REPO"
       exit 0
     fi
+
   else
     if [[ -n "$GITHUB_TOKEN" ]]; then
       AUTH_URL="https://$GITHUB_TOKEN@github.com/$GITHUB_REPO"
@@ -270,6 +343,7 @@ if [[ "$USE_GIT" == "true" ]] && [[ -n "$GITHUB_REPO" ]]; then
         send_notification "Success" "Cloned $GITHUB_REPO"
         exit 0
       fi
+
     else
       if "${GIT_CMD[@]}" clone ${GIT_DEPTH:+--depth="$GIT_DEPTH"} --branch "$GITHUB_BRANCH" "https://github.com/$GITHUB_REPO" "$CLONE_DIR"; then
         send_notification "Success" "Cloned $GITHUB_REPO"
@@ -277,7 +351,38 @@ if [[ "$USE_GIT" == "true" ]] && [[ -n "$GITHUB_REPO" ]]; then
       fi
     fi
   fi
-  
+ 
+elif [[ "$USE_ZSYNC" == "true" ]]; then
+  echo "Attempt $ATTEMPT (zsync)..." | tee -a "$LOGFILE"
+  ZSYNC_ARGS=()
+  [[ "$ZSYNC_UPDATE" == "true" ]] && [[ -n "$ZSYNC_OLD_VERSION" ]] && ZSYNC_ARGS+=(-i "$ZSYNC_OLD_VERSION")
+  ZSYNC_ARGS+=(-o "$DIRPATH/$OUTFILE")
+  if "$ZSYNC" "${ZSYNC_ARGS[@]}" "$URL"; then
+    send_notification "Success" "Downloaded $URL"
+    exit 0
+  fi
+
+elif [[ "$USE_LFTP" == "true" ]]; then
+  echo "Attempt $ATTEMPT (lftp)..." | tee -a "$LOGFILE"
+  LFTP_RATE=""
+  [[ "$LFTP_SPEED_LIMITS" == "true" ]] && LFTP_RATE="set net:limit-rate $(to_kbps "$DOWNLOAD_LIMIT")k:$(to_kbps "$UPLOAD_LIMIT")k;"
+  if "$LFTP" -e "${LFTP_RATE}pget -n $STREAMS '$URL' -o '$DIRPATH/$OUTFILE'; quit"; then
+    send_notification "Success" "Downloaded $URL"
+    exit 0
+  fi
+
+elif [[ "$USE_TRANSMISSION" == "true" ]]; then
+  echo "Attempt $ATTEMPT (transmission-remote)..." | tee -a "$LOGFILE"
+  TRANS_ARGS=("$TRANSMISSION_HOST")
+  [[ -n "$TRANSMISSION_AUTH" ]] && TRANS_ARGS+=(--auth "$TRANSMISSION_AUTH")
+  [[ "$TRANSMISSION_SPEED_LIMITS" == "true" ]] && \
+    TRANS_ARGS+=(--downlimit "$(to_kbps "$DOWNLOAD_LIMIT")" --uplimit "$(to_kbps "$UPLOAD_LIMIT")")
+  TRANS_ARGS+=(--add "$URL" --download-dir "$DIRPATH")
+  if "$TRANSMISSION" "${TRANS_ARGS[@]}"; then
+    send_notification "Success" "Queued $URL in transmission"
+    exit 0
+  fi
+
 elif [[ "$USE_CURL" == "true" ]]; then
   echo "Attempt $ATTEMPT (curl)..." | tee -a "$LOGFILE"
   CURL_LIMITS=()
@@ -286,6 +391,7 @@ elif [[ "$USE_CURL" == "true" ]]; then
     send_notification "Success" "Downloaded $URL"
     exit 0
   fi
+
 elif [[ "$USE_WGET" == "true" ]]; then
   echo "Attempt $ATTEMPT (wget)..." | tee -a "$LOGFILE"
   WGET_LIMITS=()
@@ -294,6 +400,7 @@ elif [[ "$USE_WGET" == "true" ]]; then
     send_notification "Success" "Downloaded $URL"
     exit 0
   fi
+
 elif [[ "$USE_SURGE" == "true" ]] || \
     ( [[ "$USE_ARIA2" != "true" ]] && [[ "$DOWNLOAD_ALL" != "true" ]] && \
     [[ "$URL" == http://* || "$URL" == https://* ]] && \
@@ -304,12 +411,15 @@ elif [[ "$USE_SURGE" == "true" ]] || \
     send_notification "Success" "Downloaded $URL"
     exit 0
   fi
+
 else
   CMD=("$ARIA2C" -x "$STREAMS" -s "$STREAMS" --max-tries="$MAX_TRIES_INSIDE_ARIA2C" \
         --retry-wait="$RETRY_WAIT" --timeout="$TIMEOUT" --check-certificate="$CHECK_CERT" \
         --save-session="$SESSION_FILE" --save-session-interval="$SAVING_INTERVAL" \
         --allow-overwrite="$ALLOW_OVERWRITE" --file-allocation="$FILE_ALLOCATION")
   [[ "$ARIA2_SPEED_LIMITS" == "true" ]] && CMD+=(--max-overall-download-limit="$DOWNLOAD_LIMIT" --max-overall-upload-limit="$UPLOAD_LIMIT")
+  
+  CMD+=(--min-split-size="$BUFFER_SIZE")
 
   if [[ "$DOWNLOAD_ALL" == "true" ]]; then
     INPUT_FILE="$DIRPATH/crawl.txt"
